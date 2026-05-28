@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
+from fastapi.encoders import jsonable_encoder
 import joblib
 import os
 import uvicorn
@@ -49,7 +51,18 @@ __main__.ChurnPredictor = ChurnPredictor
 
 # 3. GLOBAL INITIALIZATION (Outside the __main__ block)
 app = FastAPI(title="Customer Retention Engine")
-MODEL_PATH = r'C:\Users\USER\customer_retention\retention_engine_v1.pkl'
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In strict production, replace "*" with your specific Streamlit URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "retention_engine_v1.pkl")
+
 engine = None
 model_status = "Not loaded"
 
@@ -168,8 +181,7 @@ def predict_churn(data: Customer):
         ]
 
         for field in service_fields:
-            # We check what your input form passes. If it passes 1 for Tech_Support_No, we keep it.
-            # If it doesn't pass it, we look at the matching positive field or assume 1 (No service) to protect safety.
+            
             features[field] = input_dict.get(field, 1)
 
         no_count = sum(features [field] for field in service_fields)
@@ -222,7 +234,7 @@ if __name__ == "__main__":
     print("--- STARTING UVICORN SERVER ---")
     # We use the app object directly here
     # Host '0.0.0.0' allows access from other devices on your network if needed
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
 
 
 
