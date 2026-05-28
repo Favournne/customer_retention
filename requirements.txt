@@ -5,3 +5,9 @@ matplotlib
 seaborn
 jupyterlab
 openpyxl
+fastapi
+unicorn
+streamlit
+joblib
+shap
+xgboost
