@@ -46,7 +46,7 @@ if submit:
         "Partner_Yes": 1 if partner == "Yes" else 0
     }
     try:
-        response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
+        response = requests.post(f"{API_URL}/predict", json=payload, timeout=65)
             
         if response.status_code == 200:
             data = response.json()["prediction"]
