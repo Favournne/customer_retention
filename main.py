@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from typing import Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 import joblib
 import os
 import uvicorn
@@ -26,9 +26,9 @@ class ChurnPredictor:
             
             results = []
             for p in probs:
-                if p > 0.8:
+                if p > 0.7:
                     rec = "Urgent: High-priority retention call & 50% discount offer"
-                elif p > 0.5:
+                elif p > 0.4:
                     rec = "Offer 20% discount & personalized feedback survey"
                 else:
                     rec = "Standard follow-up: Send newsletter & feature updates"
@@ -86,16 +86,18 @@ class Customer(BaseModel):
     Paperless_Billing_Yes: Optional[int] = Field(default=0)
     Payment_Method_Electronic_check: Optional[int] = Field(default=0)
 
-    @validator('*', pre=True)
-    def check_empty_values(cls, v):
+    @field_validator('*', mode='before')
+    def force_to_zero(cls, v):
+        # If the value is a blank string " ", an empty string "", or null
         if v is None or (isinstance(v, str) and v.strip() == ""):
-            return None # Pydantic will then use the 'default' value
+            return None # This tells Pydantic to use your default value (0)
         return v
 
 @app.get("/")
 def home():
     return {"status": "success", "model_status": model_status}
 
+from fastapi.encoders import jsonable_encoder
 @app.post("/predict")
 def predict_churn(data: Customer):
     
@@ -103,7 +105,8 @@ def predict_churn(data: Customer):
         raise HTTPException(status_code=500, detail=model_status)
 
     try:
-        input_dict = data.dict()
+        input_dict = data.model_dump()
+
         if input_dict['Total_Charges'] <= 0 and input_dict['Tenure_Months'] > 0:
             input_dict['Total_Charges'] = input_dict['Monthly_Charges'] * input_dict['Tenure_Months']
        
@@ -130,17 +133,18 @@ def predict_churn(data: Customer):
         features['Monthly_Charges'] = input_dict.get('Monthly_Charges', 0)
         features['Total_Charges'] = input_dict.get('Total_Charges', 0)
 
-        features['Gender_Male'] = input_dict['Gender_Male']
-        features['Gender_Female'] = 1 if input_dict['Gender_Male'] == 0 else 0
+        features['Gender_Male'] = input_dict.get('Gender_Male', 0)
+        features['Gender_Female'] = 1 if features['Gender_Male'] == 0 else 0
 
-        features['Senior_Citizen_Yes'] = input_dict['Senior_Citizen_Yes']
-        features['Senior_Citizen_No'] = 1 if input_dict['Senior_Citizen_Yes'] == 0 else 0
+        features['Senior_Citizen_Yes'] = input_dict.get('Senior_Citizen_Yes', 0)
+        features['Senior_Citizen_No'] = 1 if features['Senior_Citizen_Yes'] == 0 else 0
         
         # Partner & Dependents
-        features['Partner_Yes'] = input_dict['Partner_Yes']
-        features['Partner_No'] = 1 if input_dict['Partner_Yes'] == 0 else 0
-        features['Dependents_Yes'] = input_dict['Dependents_Yes']
-        features['Dependents_No'] = 1 if input_dict['Dependents_Yes'] == 0 else 0
+        features['Partner_Yes'] = input_dict.get('Partner_Yes', 0)
+        features['Partner_No'] = 1 if features['Partner_Yes'] == 0 else 0
+        
+        features['Dependents_Yes'] = input_dict.get('Dependents_Yes', 0)
+        features['Dependents_No'] = 1 if features['Dependents_Yes'] == 0 else 0
 
         if input_dict.get('Contract_Month_to_month') == 1:
             features['Contract_Month-to-month'] = 1
@@ -149,19 +153,35 @@ def predict_churn(data: Customer):
         else:
             features['Contract_Two_year'] = 1
 
-        features['Payment_Method_Electronic_check'] = input_dict['Payment_Method_Electronic_check']
-        features['Paperless_Billing_Yes'] = input_dict['Paperless_Billing_Yes']
-        features['Paperless_Billing_No'] = 1 if input_dict['Paperless_Billing_Yes'] == 0 else 0
+        features['Payment_Method_Electronic_check'] = input_dict.get('Payment_Method_Electronic_check', 0)
+        
+        if features['Payment_Method_Electronic_check'] == 0:
+            features ['Payment_Method_Electronic_check'] = 1
+        
+        
+        features['Paperless_Billing_Yes'] = input_dict.get('Paperless_Billing_Yes', 0)
+        features['Paperless_Billing_No'] = 1 if features ['Paperless_Billing_Yes'] == 0 else 0
 
         service_fields = [
             'Tech_Support_No', 'Online_Security_No', 'Online_Backup_No', 
             'Device_Protection_No', 'Streaming_TV_No', 'Streaming_Movies_No'
         ]
-        no_count = sum(input_dict.get(field, 1) for field in service_fields)
+
+        for field in service_fields:
+            # We check what your input form passes. If it passes 1 for Tech_Support_No, we keep it.
+            # If it doesn't pass it, we look at the matching positive field or assume 1 (No service) to protect safety.
+            features[field] = input_dict.get(field, 1)
+
+        no_count = sum(features [field] for field in service_fields)
         actual_service_count = 6 - no_count
         features[f'Service_Count_{actual_service_count}'] = 1
 
-        # We pass only the values in the correct order
+        if features['Monthly_Charges']>70:
+            features['Internet_Service_Fiber_optic'] = 1
+        else:
+            features['Internet_Service_DSL'] = 1
+
+                # We pass only the values in the correct order
         raw_result = engine.predict_and_recommend([features])
 
         if not raw_result:
@@ -169,19 +189,31 @@ def predict_churn(data: Customer):
 
         prediction = raw_result[0]
         prob = prediction.get('probability', 0)
-        risk_level = "High Risk" if prob > 0.80 else "Medium Risk" if prob > 0.50 else "Low Risk"
-    
-        return {
-            "status": "success",
-            "prediction": {
-                "probability": f"{prob * 100:.2f}%",
-                "risk": risk_level,
-                "action": prediction.get('recommendation', 'N/A')
-            }
-        }
 
+        risk_level = "High Risk" if prob > 0.70 else "Medium Risk" if prob > 0.40 else "Low Risk"
+
+        clean_risk =str(risk_level).strip("{}'[]")
+        raw_action = prediction.get('recommendation', 'Standard follow_up')
+    
+
+        if isinstance(raw_action, (set, list)):
+            clean_action  = ", ".join(map(str, raw_action))
+        else:
+            clean_action = str(raw_action).strip("{}'[]")
+
+        response_data = {
+        "status": "success",
+        "prediction": {
+            "probability": f"{prob * 100:.2f}%",
+            "risk": risk_level, 
+            "action": clean_action
+        }
+    }
     except Exception as e:
+        print(f"DEBUG: risk_level type is {type(risk_level)} and value is {risk_level}")
         return {"error": str(e)}
+        
+    return jsonable_encoder(response_data)
 
 
        
@@ -191,3 +223,9 @@ if __name__ == "__main__":
     # We use the app object directly here
     # Host '0.0.0.0' allows access from other devices on your network if needed
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
+
+
+
+
+    # run using "uvicorn main:app --reload" in terminal (make sure you're in the correct directory where main.py is located) or python main.py
