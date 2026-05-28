@@ -11,6 +11,6 @@ streamlit
 joblib
 shap
 xgboost
-request
+requests
 pydantic
 imbalanced-learn
