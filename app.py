@@ -1,7 +1,10 @@
 import streamlit as st
 import requests
+import os
 
 st.set_page_config(page_title="Customer Prediction App", layout="wide")
+
+API_URL = "https://customer-retention-fbg7.onrender.com"
 
 st.title("📊 Customer Prediction App")
 st.markdown("Enter customer data below to generate a real-time risk assessment.")
@@ -43,7 +46,7 @@ if submit:
         "Partner_Yes": 1 if partner == "Yes" else 0
     }
     try:
-        response = requests.post("http://127.0.0.1:8000/predict", json=payload)
+        response = requests.post(f"{API_URL}/predict", json=payload, timeout=15)
             
         if response.status_code == 200:
             data = response.json()["prediction"]
