@@ -6,8 +6,11 @@ seaborn
 jupyterlab
 openpyxl
 fastapi
-unicorn
+uvicorn
 streamlit
 joblib
 shap
 xgboost
+request
+pydantic
+imbalanced-learn
